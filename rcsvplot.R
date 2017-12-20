@@ -246,9 +246,7 @@ p18 <- ggplot(data=sampling_error_df, mapping = aes(x = interval, y = sqrt(error
   ylab("mean sum squared error") + 
   scale_x_continuous(breaks = c(1, 8, 16, 24, 32, 40, 50))
 
-
-
-p19 <- ggplot(tall_err_df, aes(sampling_strategy, error)) + 
+p19 <- ggplot(tall_err_df, aes(sampling_strategy, error)) +
   geom_violin()
 
 gathered_df <- gather(plot_df, key = "sampling_strategy", value = "error",
@@ -258,9 +256,6 @@ p20 <- ggplot(gathered_df, aes(pattern, error)) +
   geom_violin() + 
   scale_y_log10(breaks=c(1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 2)) +
   facet_wrap(~sampling_strategy)
-
-
-
 
 # ggsave("sampling_error.png", p18)
 # ggsave("num_toplevel_urls.png", p13)
