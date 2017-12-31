@@ -239,24 +239,125 @@ p16 <- ggplot(data=plot_df, mapping = aes(x = samplingErrorSumSquared_50_8)) +
 p17 <- ggplot(data=plot_df, mapping = aes(y = samplingErrorSumSquared_0_8, x = 1)) +
   geom_jitter()
 
-p18 <- ggplot(data=sampling_error_df, mapping = aes(x = interval, y = sqrt(error), color = as.factor(start_time)))  +
+p18 <- ggplot(data=sampling_error_df, mapping = aes(x = interval, y = error, color = as.factor(start_time)))  +
   geom_line() + 
   geom_point() +
   labs(color = "sampling start time") + 
   ylab("mean sum squared error") + 
   scale_x_continuous(breaks = c(1, 8, 16, 24, 32, 40, 50))
 
-p19 <- ggplot(tall_err_df, aes(sampling_strategy, error)) +
+
+
+p19 <- ggplot(tall_err_df, aes(sampling_strategy, error)) + 
   geom_violin()
 
-gathered_df <- gather(plot_df, key = "sampling_strategy", value = "error",
-                      error_16_16, error_first_three, factor_key = TRUE)
 
-p20 <- ggplot(gathered_df, aes(pattern, error)) + 
-  geom_violin() + 
-  scale_y_log10(breaks=c(1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 2)) +
-  facet_wrap(~sampling_strategy)
 
+
+first_n_sampling_methods = c("first one", "first two", "first three")
+t = tibble(sampling_method = factor(first_n_sampling_methods,
+                                    levels = first_n_sampling_methods),
+           error = c(0.01, 0.02, 0.03))
+
+get_sampling_error_keys <- function() {
+  start_times <- c(8, 16, 24, 32, 40, 50)
+  intervals <- c(1, 8, 16, 24, 32, 40, 50)
+  keys <- c()
+  for (s in start_times) {
+    keys <- c(keys, paste("error_start", s, "_interval", intervals, sep = ""))
+  }
+  return(keys)
+}
+
+sampling_error_keys <- get_sampling_error_keys()
+first_n_error_keys <- str_c("error_first_n_", c(1, 2, 3))
+
+error_keys = c(sampling_error_keys, first_n_error_keys)
+
+error_gathered_df <- plot_df %>%
+  gather(key = "approx_strategy", value = "error",
+         !!error_keys, factor_key = TRUE)
+
+sampling_param_pattern = "^error_start([\\d]+)_interval([\\d]+)$"
+
+sampling_err_df <- error_gathered_df %>%
+  filter(approx_strategy %in% sampling_error_keys) %>%
+  tidyr::extract(approx_strategy, c("start", "interval"),
+                 sampling_param_pattern, convert = TRUE)
+
+first_n_display <- list(
+  error_first_n_1 = "First One",
+  error_first_n_2 = "First Two",
+  error_first_n_3 = "First Three"
+)
+
+first_n_err_df <- error_gathered_df %>%
+  filter(approx_strategy %in% first_n_error_keys) %>%
+  mutate(
+    n_value = factor(sapply(approx_strategy,
+                            function(x) { first_n_display[[as.character(x)]] }),
+                     levels = unlist(first_n_display, use.names = FALSE))
+  )
+
+summary_sampling_err_df <- sampling_err_df %>%
+  group_by(start, interval, pattern) %>%
+  summarize(
+    mean_error = mean(error),
+    median_error = median(error),
+    error_90th = quantile(error, 0.9),
+    error_nth = quantile(error, 0.8)
+  )
+
+summary_first_n_err_df <- first_n_err_df %>%
+  group_by(n_value) %>%
+  summarize(
+    mean_error = mean(error)
+  )
+  
+  
+
+# p20 <- ggplot(gathered_df, aes(sampling_strategy, error)) + 
+#   geom_violin() + 
+#   scale_y_log10(breaks=c(1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 2))
+# # facet_wrap(~pattern)
+#
+
+p21 <- ggplot(data=sampling_err_df, mapping = aes(x = interval, y = error, color = as.factor(start)))  +
+  geom_line(stat="summary", fun.y=mean) +
+  geom_point(stat="summary", fun.y=mean) +
+  labs(color = "Sampling Start Time",
+       linetype = "First N Strategy") +
+  ylab("mean sum squared error") +
+  scale_x_continuous(breaks = c(1, 8, 16, 24, 32, 40, 50)) + 
+  scale_color_brewer(palette = "Dark2") +
+  geom_hline(data = summary_first_n_err_df,
+             mapping = aes(yintercept = mean_error, linetype = n_value),
+             color = "#00AAFF")
+  # facet_wrap(~pattern)
+
+summary_first_n_err_df_by_pattern <- first_n_err_df %>%
+  group_by(n_value, pattern) %>%
+  summarize(
+    mean_error = mean(error)
+  )
+
+p22 <- ggplot(data=sampling_err_df, mapping = aes(x = interval, y = error, color = as.factor(start)))  +
+  geom_line(stat="summary", fun.y=mean) +
+  geom_point(stat="summary", fun.y=mean) +
+  labs(color = "Sampling Start Time",
+       linetype = "First N Strategy") +
+  ylab("mean sum squared error") +
+  scale_x_continuous(breaks = c(1, 8, 16, 24, 32, 40, 50)) + 
+  scale_color_brewer(palette = "Dark2") +
+  geom_hline(data = summary_first_n_err_df_by_pattern,
+             mapping = aes(yintercept = mean_error, linetype = n_value),
+             color = "#00AAFF") +
+  facet_wrap(~pattern)
+p22
+
+
+# ggsave("approx_error_facet_pattern.png", p22)
+# ggsave("approx_error_all.png", p21)
 # ggsave("sampling_error.png", p18)
 # ggsave("num_toplevel_urls.png", p13)
 # ggsave("zoom_multi_more_than_three_first_bin.png", p12)
