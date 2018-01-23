@@ -266,9 +266,6 @@ def write_csv(json_list, output_filename):
         sum_first_three_12 = sum([t["totalTime"] for t in subtasks[:3]
                                   if t["totalTime"] >= 12], 0)
         num_urls = get_num_urls(subtasks)
-        perfect_proportions = get_perfect_proportions(breakdown)
-        sampling_0_8 = get_sampling_proportions(breakdown, 0, 8)
-        sampling_50_8 = get_sampling_proportions(breakdown, 50, 8)
         return_dict.update({
           'fsl': first_subtask_length,
           'fslTotal': first_subtask_url_duration,
@@ -459,6 +456,8 @@ def write_error_percentile_json(long_tasks, output_filename):
   with open(output_filename, 'w') as f:
     json.dump(percentile_examples, f)
 
+  print "Wrote output to ", output_filename
+
 def main():
   # TODO(dproy): It may eventually make sense to use a real argument parser.
   if len(sys.argv) < 2:
@@ -477,9 +476,9 @@ def main():
   long_tasks = get_long_tasks_with_scripts(cleaned_json_list)
 
   # write_json_list(cleaned_json_list, output_filename_prefix + '.csv')
-  # write_csv(cleaned_json_list, output_filename_prefix + '.csv')
+  write_csv(cleaned_json_list, output_filename_prefix + '.csv')
   # write_mean_sampling_error_csv(cleaned_json_list, "sampling_errors.csv")
-  write_error_percentile_json(long_tasks, "error_percentile_examples.json");
+  # write_error_percentile_json(long_tasks, "error_percentile_examples.json");
   # write_tall_sampling_errors_csv(long_tasks, "tall_sampling_errors.csv")
 
   print "long tasks with scripts: ", len(long_tasks)

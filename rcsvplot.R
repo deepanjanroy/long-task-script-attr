@@ -65,10 +65,6 @@ df_with_no_na_fsl <- df %>% filter(!is.na(fsl))
 stopifnot(length(df_with_no_na_fsl$duration) == length(df_with_scripts$duration))
 num_long_tasks_with_function_call = length(df_with_scripts$duration)
 
-
-
-
-
 ## Plotting stuff
 max_num_subtask = 15
 mns_string = paste(">", max_num_subtask, sep = "")
@@ -251,14 +247,6 @@ p18 <- ggplot(data=sampling_error_df, mapping = aes(x = interval, y = error, col
 p19 <- ggplot(tall_err_df, aes(sampling_strategy, error)) + 
   geom_violin()
 
-
-
-
-first_n_sampling_methods = c("first one", "first two", "first three")
-t = tibble(sampling_method = factor(first_n_sampling_methods,
-                                    levels = first_n_sampling_methods),
-           error = c(0.01, 0.02, 0.03))
-
 get_sampling_error_keys <- function() {
   start_times <- c(8, 16, 24, 32, 40, 50)
   intervals <- c(1, 8, 16, 24, 32, 40, 50)
@@ -299,7 +287,17 @@ first_n_err_df <- error_gathered_df %>%
                      levels = unlist(first_n_display, use.names = FALSE))
   )
 
+# Use ..._by_pattern further below if you want to facet wrap by pattern.
 summary_sampling_err_df <- sampling_err_df %>%
+  group_by(start, interval) %>%  
+  summarize(
+    mean_error = mean(error),
+    median_error = median(error),
+    error_90th = quantile(error, 0.9),
+    error_nth = quantile(error, 0.8)
+  )
+
+summary_sampling_by_pattern_err_df <- sampling_err_df %>%
   group_by(start, interval, pattern) %>%
   summarize(
     mean_error = mean(error),
@@ -313,8 +311,6 @@ summary_first_n_err_df <- first_n_err_df %>%
   summarize(
     mean_error = mean(error)
   )
-  
-  
 
 # p20 <- ggplot(gathered_df, aes(sampling_strategy, error)) + 
 #   geom_violin() + 
@@ -322,17 +318,17 @@ summary_first_n_err_df <- first_n_err_df %>%
 # # facet_wrap(~pattern)
 #
 
-p21 <- ggplot(data=sampling_err_df, mapping = aes(x = interval, y = error, color = as.factor(start)))  +
-  geom_line(stat="summary", fun.y=mean) +
-  geom_point(stat="summary", fun.y=mean) +
+p21 <- ggplot(data=summary_sampling_err_df, mapping = aes(x = interval, y = mean_error, color = as.factor(start)))  +
+  geom_line() +
+  geom_point() +
   labs(color = "Sampling Start Time",
        linetype = "First N Strategy") +
-  ylab("mean sum squared error") +
+  ylab("median sum squared error") +
   scale_x_continuous(breaks = c(1, 8, 16, 24, 32, 40, 50)) + 
-  scale_color_brewer(palette = "Dark2") +
-  geom_hline(data = summary_first_n_err_df,
-             mapping = aes(yintercept = mean_error, linetype = n_value),
-             color = "#00AAFF")
+  scale_color_brewer(palette = "Dark2")
+  # geom_hline(data = summary_first_n_err_df,
+  #            mapping = aes(yintercept = mean_error, linetype = n_value),
+  #            color = "#00AAFF")
   # facet_wrap(~pattern)
 
 summary_first_n_err_df_by_pattern <- first_n_err_df %>%
@@ -351,11 +347,57 @@ p22 <- ggplot(data=sampling_err_df, mapping = aes(x = interval, y = error, color
   scale_color_brewer(palette = "Dark2") +
   geom_hline(data = summary_first_n_err_df_by_pattern,
              mapping = aes(yintercept = mean_error, linetype = n_value),
-             color = "#00AAFF") +
+             color = "#00AAFF")
+
+p23 <- ggplot(data=summary_sampling_err_df, mapping = aes(x = interval, y = mean_error, color = as.factor(start)))  +
+  geom_line() +
+  geom_point() +
+  labs(color = "Sampling start time (ms)",
+       linetype = "First N Strategy") +
+  ylab("Mean sum squared error") +
+  xlab("Sampling interval (ms)") + 
+  scale_x_continuous(breaks = c(1, 8, 16, 24, 32, 40, 50)) + 
+  scale_color_brewer(palette = "Dark2") + 
+  labs(title = "Mean approximation errors for sampling approaches")
+
+p24 <- ggplot(data=summary_sampling_err_df, mapping = aes(x = interval, y = median_error, color = as.factor(start)))  +
+  geom_line() +
+  geom_point() +
+  labs(color = "Sampling start time (ms)",
+       linetype = "First N Strategy") +
+  ylab("Median sum squared error") +
+  xlab("Sampling interval (ms)") + 
+  scale_x_continuous(breaks = c(1, 8, 16, 24, 32, 40, 50)) + 
+  scale_color_brewer(palette = "Dark2") + 
+  labs(title = "Median approximation errors for sampling approaches")
+
+p25 <- ggplot(data=summary_sampling_err_df, mapping = aes(x = interval, y = error_90th, color = as.factor(start)))  +
+  geom_line() +
+  geom_point() +
+  labs(color = "Sampling start time (ms)") + 
+  ylab("90th percentile of sum squared error") +
+  xlab("Sampling interval (ms)") + 
+  scale_x_continuous(breaks = c(1, 8, 16, 24, 32, 40, 50)) + 
+  scale_color_brewer(palette = "Dark2") + 
+  labs(title = "90th percentile approximation errors for sampling approaches")
+
+p26 <- ggplot(data=summary_sampling_by_pattern_err_df, mapping = aes(x = interval, y = mean_error, color = as.factor(start)))  +
+  geom_line() +
+  geom_point() +
+  labs(color = "Sampling start time (ms)") + 
+  ylab("Mean sum squared error") +
+  xlab("Sampling interval (ms)") + 
+  scale_x_continuous(breaks = c(1, 8, 16, 24, 32, 40, 50)) + 
+  scale_color_brewer(palette = "Dark2") + 
+  labs(title = "Mean approximation errors for sampling approaches by pattern") + 
   facet_wrap(~pattern)
-p22
 
 
+
+# ggsave("sampling_error_graph_mean_by_pattern.png", p26)
+# ggsave("sampling_error_graph_90th.png", p25)
+# ggsave("sampling_error_graph_median.png", p24)
+# ggsave("sampling_error_graph_mean.png", p23)
 # ggsave("approx_error_facet_pattern.png", p22)
 # ggsave("approx_error_all.png", p21)
 # ggsave("sampling_error.png", p18)
