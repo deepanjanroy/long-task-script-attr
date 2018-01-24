@@ -297,7 +297,7 @@ summary_sampling_err_df <- sampling_err_df %>%
     error_nth = quantile(error, 0.8)
   )
 
-summary_sampling_by_pattern_err_df <- sampling_err_df %>%
+summary_sampling_err_df_by_pattern <- sampling_err_df %>%
   group_by(start, interval, pattern) %>%
   summarize(
     mean_error = mean(error),
@@ -309,14 +309,20 @@ summary_sampling_by_pattern_err_df <- sampling_err_df %>%
 summary_first_n_err_df <- first_n_err_df %>%
   group_by(n_value) %>%
   summarize(
-    mean_error = mean(error)
+    mean_error = mean(error),
+    meadian_error = median(error),
+    error_90th = quantile(error, 0.9),
+    error_nth = quantile(error, 0.8)
   )
 
-# p20 <- ggplot(gathered_df, aes(sampling_strategy, error)) + 
-#   geom_violin() + 
-#   scale_y_log10(breaks=c(1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 2))
-# # facet_wrap(~pattern)
-#
+summary_first_n_err_df_by_pattern <- first_n_err_df %>%
+  group_by(n_value, pattern) %>%
+  summarize(
+    mean_error = mean(error),
+    meadian_error = median(error),
+    error_90th = quantile(error, 0.9),
+    error_nth = quantile(error, 0.8)
+  )
 
 p21 <- ggplot(data=summary_sampling_err_df, mapping = aes(x = interval, y = mean_error, color = as.factor(start)))  +
   geom_line() +
@@ -331,11 +337,6 @@ p21 <- ggplot(data=summary_sampling_err_df, mapping = aes(x = interval, y = mean
   #            color = "#00AAFF")
   # facet_wrap(~pattern)
 
-summary_first_n_err_df_by_pattern <- first_n_err_df %>%
-  group_by(n_value, pattern) %>%
-  summarize(
-    mean_error = mean(error)
-  )
 
 p22 <- ggplot(data=sampling_err_df, mapping = aes(x = interval, y = error, color = as.factor(start)))  +
   geom_line(stat="summary", fun.y=mean) +
@@ -381,7 +382,7 @@ p25 <- ggplot(data=summary_sampling_err_df, mapping = aes(x = interval, y = erro
   scale_color_brewer(palette = "Dark2") + 
   labs(title = "90th percentile approximation errors for sampling approaches")
 
-p26 <- ggplot(data=summary_sampling_by_pattern_err_df, mapping = aes(x = interval, y = mean_error, color = as.factor(start)))  +
+p26 <- ggplot(data=summary_sampling_err_df_by_pattern, mapping = aes(x = interval, y = mean_error, color = as.factor(start)))  +
   geom_line() +
   geom_point() +
   labs(color = "Sampling start time (ms)") + 
@@ -392,8 +393,49 @@ p26 <- ggplot(data=summary_sampling_by_pattern_err_df, mapping = aes(x = interva
   labs(title = "Mean approximation errors for sampling approaches by pattern") + 
   facet_wrap(~pattern)
 
+# p20 <- ggplot(gathered_df, aes(sampling_strategy, error)) +
+#   geom_violin() +
+#   scale_y_log10(breaks=c(1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 2))
+# # facet_wrap(~pattern)
+
+p27 <- ggplot(data=first_n_err_df, mapping = aes(x = n_value, y = error))+
+  geom_violin() + 
+  scale_y_log10(breaks=c(1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 2, 4, 8)) + 
+  ylab("Error (log scaled axis)") + 
+  labs(title = "Distribution of errors for first-n approximations by pattern") + 
+  facet_wrap(~pattern)
 
 
+p28 <- ggplot(data=summary_sampling_err_df_by_pattern, mapping = aes(x = interval, y = mean_error, color = as.factor(start)))  +
+  geom_line() +
+  geom_point() +
+  labs(color = "Sampling Start Time",
+       linetype = "First N Strategy") +
+  ylab("median sum squared error") +
+  scale_x_continuous(breaks = c(1, 8, 16, 24, 32, 40, 50)) + 
+  scale_color_brewer(palette = "Dark2") + 
+  geom_hline(data = summary_first_n_err_df_by_pattern,
+           mapping = aes(yintercept = mean_error, linetype = n_value),
+           color = "#00AAFF") + 
+  facet_wrap(~pattern)
+
+
+p28
+
+
+# printing the error table. 
+# mean(plot_df$error_first_n_1)
+# mean(plot_df$error_first_n_2)
+# mean(plot_df$error_first_n_3)
+# median(plot_df$error_first_n_3)
+# median(plot_df$error_first_n_2)
+# median(plot_df$error_first_n_1)
+# median(plot_df$error_first_n_1)
+# quantile(plot_df$error_first_n_1, 0.9)
+# quantile(plot_df$error_first_n_2, 0.9)
+# quantile(plot_df$error_first_n_3, 0.9)
+
+# ggsave("first_n_violin_by_pattern.png", p27)
 # ggsave("sampling_error_graph_mean_by_pattern.png", p26)
 # ggsave("sampling_error_graph_90th.png", p25)
 # ggsave("sampling_error_graph_median.png", p24)
