@@ -419,8 +419,18 @@ p28 <- ggplot(data=summary_sampling_err_df_by_pattern, mapping = aes(x = interva
            color = "#00AAFF") + 
   facet_wrap(~pattern)
 
+direct_comparison_df = plot_df %>% 
+  select(error_start16_interval16, error_first_n_3, pattern) %>%
+  gather(approximation, error,
+         error_start16_interval16, error_first_n_3)
 
-p28
+p29 <- ggplot(data=direct_comparison_df, mapping = aes(x = approximation, y = error))+
+  geom_violin() + 
+  scale_y_log10(breaks=c(1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 2, 4, 8)) + 
+  ylab("Sum squared error (log scaled axis)") + 
+  xlab("Approximation") +
+  labs(title = "-----")
+  # facet_wrap(~pattern)
 
 
 # printing the error table. 

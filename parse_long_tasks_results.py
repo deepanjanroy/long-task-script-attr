@@ -5,12 +5,14 @@ now, and also contains lots of copy pasta. Consider refactoring.
 """
 
 from collections import defaultdict
-from pprint import pprint
-from parse_ctp_results import load_json_results_from_file, log_debug
 from enum import Enum
+from parse_ctp_results import load_json_results_from_file, log_debug
+from pprint import pprint
+from tabulate import tabulate
 import csv
 import json
 import math
+import re
 import sys
 import traceback
 
@@ -18,6 +20,25 @@ def filter_subtasks(long_task_breakdowns):
   for long_task in long_task_breakdowns:
     long_task['subtasks'] = [st for st in
         long_task['subtasks'] if st['type'] == 'FunctionCall']
+
+
+#################################################################
+# Functions for "human sorting"
+# Copying from https://stackoverflow.com/questions/5967500/
+
+def atoi(text):
+    return int(text) if text.isdigit() else text
+
+def natural_keys(text):
+    '''
+    alist.sort(key=natural_keys) sorts in human order
+    http://nedbatchelder.com/blog/200712/human_sorting.html
+    (See Toothy's implementation in the comments)
+    '''
+    return [ atoi(c) for c in re.split('(\d+)', text) ]
+
+################################################################
+
 
 def process_json_results(result_json_list):
   """
@@ -441,6 +462,23 @@ def get_examples_at_percentile(long_tasks, prop_func, comp_prop_func,
     })
   return return_dicts
 
+def get_long_tasks_at_error_percentiles(long_tasks, prop_func, percentiles):
+  return_long_tasks = {}
+  errors = []
+  diff = diff_proportions_sum_squared
+  for lt in long_tasks:
+    pp = get_perfect_proportions(lt)
+    test_prop = prop_func(lt)
+    error = diff(pp, test_prop)
+    errors.append({'error': error, 'long_task': lt})
+
+  errors = sorted(errors, key=lambda x: x['error'])
+  for p in percentiles:
+    i = int(math.floor(p * (len(errors) - 1)))
+    long_task = errors[i]['long_task']
+    return_long_tasks[p] = long_task
+  return return_long_tasks
+
 def write_error_percentile_json(long_tasks, output_filename):
   percentile_examples = [
     {
@@ -457,6 +495,78 @@ def write_error_percentile_json(long_tasks, output_filename):
     json.dump(percentile_examples, f)
 
   print "Wrote output to ", output_filename
+
+
+def append_pretty_error_comparison(long_task, f):
+  f.write("All times in milliseconds.\n")
+  f.write("Long task duration: " + str(long_task['duration']) + '\n')
+  f.write("Subtasks:\n")
+  subtasks = long_task['subtasks']
+  url_to_factors = factorize_urls(long_task)
+  for s in subtasks:
+    f.write("  * ")
+    f.write(url_to_factors[s['url']])
+    f.write(' : ')
+    start = s['start'] - long_task['start']
+    end = start + s['totalTime']
+    f.write('[Start {:.1f}, End {:.1f}]'.format(start, end))
+    f.write(' : ')
+    f.write('Duration {:.1f}'.format(s['totalTime']))
+    f.write('\n')
+  f.write('\n')
+  f.write('Comparison of approximation approaches: \n')
+  perfect_proportions = normalize_props(url_to_factors,
+                                        get_perfect_proportions(long_task))
+  first_3_props = normalize_props(url_to_factors,
+                                  get_first_n_proportions(long_task, 3))
+  sampling_props = normalize_props(url_to_factors,
+                                   get_sampling_proportions(long_task, 16, 16))
+  urls = sorted(url_to_factors.values(), key=natural_keys)
+  headers = ["Url", "Perfect proportions", "Sampling-16-16", "First-3"]
+  rows = []
+  for url in urls:
+    rows.append([url,
+                 perfect_proportions.get(url, 0),
+                 sampling_props.get(url, 0),
+                 first_3_props.get(url, 0)])
+  d = diff_proportions_sum_squared
+
+  rows.append(["Sum squared Error:",
+               d(perfect_proportions, perfect_proportions),
+               d(sampling_props, perfect_proportions),
+               d(first_3_props, perfect_proportions)])
+  f.write(tabulate(rows, headers=headers, floatfmt=".5f"))
+
+def write_errors_at_percentile_pretty(long_tasks, output_filename):
+  first_n_percentiles = get_long_tasks_at_error_percentiles(long_tasks,
+      lambda lt: get_first_n_proportions(lt, 3),
+      # the actually 0.5 percentile example was boring.
+      # Nudge to get a more interesting example.
+      [0.501, 0.9, 0.99])
+  sampling_percentiles = get_long_tasks_at_error_percentiles(long_tasks,
+      lambda lt: get_sampling_proportions(lt, 16, 16),
+      # the actually 0.5 percentile example was boring.
+      # Nudge to get a more interesting example.
+      [0.501, 0.9, 0.99])
+  with open(output_filename, 'w') as f:
+    f.write("50th-percentile error for first-3 approach:\n")
+    append_pretty_error_comparison(first_n_percentiles[0.501], f)
+    f.write('\n\n')
+    f.write("90th-percentile error for first-3 approach:\n")
+    append_pretty_error_comparison(first_n_percentiles[0.9], f)
+    f.write('\n\n')
+    f.write("99th-percentile error for first-3 approach:\n")
+    append_pretty_error_comparison(first_n_percentiles[0.99], f)
+    f.write('\n\n')
+    f.write("50th-percentile error for sampling-16-16 approach:\n")
+    append_pretty_error_comparison(sampling_percentiles[0.501], f)
+    f.write('\n\n')
+    f.write("90th-percentile error for sampling-16-16 approach:\n")
+    append_pretty_error_comparison(sampling_percentiles[0.9], f)
+    f.write('\n\n')
+    f.write("99th-percentile error for sampling-16-16 approach:\n")
+    append_pretty_error_comparison(sampling_percentiles[0.99], f)
+    f.write('\n\n')
 
 def main():
   # TODO(dproy): It may eventually make sense to use a real argument parser.
@@ -476,9 +586,10 @@ def main():
   long_tasks = get_long_tasks_with_scripts(cleaned_json_list)
 
   # write_json_list(cleaned_json_list, output_filename_prefix + '.csv')
-  write_csv(cleaned_json_list, output_filename_prefix + '.csv')
+  # write_csv(cleaned_json_list, output_filename_prefix + '.csv')
   # write_mean_sampling_error_csv(cleaned_json_list, "sampling_errors.csv")
-  # write_error_percentile_json(long_tasks, "error_percentile_examples.json");
+  # write_error_percentile_json(long_tasks, "error_percentile_examples.json")
+  write_errors_at_percentile_pretty(long_tasks, "error_percentiles_pretty.txt")
   # write_tall_sampling_errors_csv(long_tasks, "tall_sampling_errors.csv")
 
   print "long tasks with scripts: ", len(long_tasks)
