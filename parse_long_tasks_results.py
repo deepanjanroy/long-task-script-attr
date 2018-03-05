@@ -8,7 +8,9 @@ from collections import defaultdict
 from enum import Enum
 from parse_ctp_results import load_json_results_from_file, log_debug
 from pprint import pprint
+import random
 from tabulate import tabulate
+from urlparse import urlparse
 import csv
 import json
 import math
@@ -21,6 +23,15 @@ def filter_subtasks(long_task_breakdowns):
     long_task['subtasks'] = [st for st in
         long_task['subtasks'] if st['type'] == 'FunctionCall']
 
+
+limited_print_count = 0
+# Debug function to only print something n times
+def print_limited(data, limit):
+  global limited_print_count
+  if limited_print_count >= limit:
+    return
+  print data
+  limited_print_count += 1
 
 #################################################################
 # Functions for "human sorting"
@@ -67,6 +78,12 @@ def process_json_results(result_json_list):
       telemetry_info_error += 1
       continue
 
+    if len(telemetry_info['stories']) != 1:
+      log_debug('Ignoring result: There should be exactly one story')
+      telemetry_info_error += 1
+      continue
+    story = telemetry_info['stories'][0]
+
     storyTags = telemetry_info['storyTags']
     cache_temperature_tags = [t for t in storyTags if 'cache_temperature' in t]
     if len(cache_temperature_tags) == 0:
@@ -99,6 +116,8 @@ def process_json_results(result_json_list):
       if 'longTaskBreakdowns' in pairs:
         filter_subtasks(pairs['longTaskBreakdowns'])  # In place changes.
         return_dict['longTasksBreakdowns'] = pairs['longTaskBreakdowns']
+        trace_tag = '#'.join([story] + storyTags)
+        return_dict['traceTag'] = trace_tag
         return_dicts.append(return_dict)
       else:
         samples_without_breakdown += 1
@@ -386,6 +405,7 @@ def get_long_tasks_with_scripts(json_list):
       subtasks = breakdown["subtasks"]
       start_time = breakdown["start"]
       if len(subtasks) > 0 and start_time is not None:
+        breakdown['traceTag'] = json_dict['traceTag']
         long_task_breakdowns.append(breakdown)
 
   return long_task_breakdowns
@@ -496,24 +516,32 @@ def write_error_percentile_json(long_tasks, output_filename):
 
   print "Wrote output to ", output_filename
 
-
-def append_pretty_error_comparison(long_task, f):
-  f.write("All times in milliseconds.\n")
-  f.write("Long task duration: " + str(long_task['duration']) + '\n')
-  f.write("Subtasks:\n")
+# Appends a readable representation of the long task
+def append_long_task_repr(long_task, f, url_to_factors=None):
   subtasks = long_task['subtasks']
-  url_to_factors = factorize_urls(long_task)
+  f.write("Long task duration: " + str(long_task['duration']) + 'ms\n')
+  f.write("Number of top level v8 call functions: {0}\n".format(len(subtasks)))
+  f.write("Top Level v8.callFunctions:\n")
   for s in subtasks:
     f.write("  * ")
-    f.write(url_to_factors[s['url']])
-    f.write(' : ')
+    if url_to_factors:
+      url = url_to_factors[s['url']]
+    else:
+      url = s['url']
     start = s['start'] - long_task['start']
     end = start + s['totalTime']
     f.write('[Start {:.1f}, End {:.1f}]'.format(start, end))
     f.write(' : ')
     f.write('Duration {:.1f}'.format(s['totalTime']))
+    f.write(' : ')
+    f.write(url)
     f.write('\n')
   f.write('\n')
+
+def append_pretty_error_comparison(long_task, f):
+  f.write("All times in milliseconds.\n")
+  url_to_factors = factorize_urls(long_task)
+  append_long_task_repr(long_task, f, url_to_factors)
   f.write('Comparison of approximation approaches: \n')
   perfect_proportions = normalize_props(url_to_factors,
                                         get_perfect_proportions(long_task))
@@ -568,6 +596,113 @@ def write_errors_at_percentile_pretty(long_tasks, output_filename):
     append_pretty_error_comparison(sampling_percentiles[0.99], f)
     f.write('\n\n')
 
+def append_many_calls_example_at_percentile(sorted_lts, percentile, f):
+  f.write('Percentile: {:.2f}\n'.format(percentile))
+  lt = sorted_lts[int(percentile * len(sorted_lts))]
+  f.write('Start time: {0}s\n'.format(lt['start']))
+  append_long_task_repr(lt, f)
+  f.write('Trace tag: {0}\n'.format(lt['traceTag']))
+  f.write('\n')
+
+def write_many_call_functions_examples(long_tasks, output_filename):
+  sorted_lts = sorted(long_tasks, key=lambda lt: len(lt['subtasks']))
+  with open(output_filename, 'w') as f:
+    append_many_calls_example_at_percentile(sorted_lts, 0.8, f)
+    append_many_calls_example_at_percentile(sorted_lts, 0.85, f)
+    append_many_calls_example_at_percentile(sorted_lts, 0.9, f)
+    append_many_calls_example_at_percentile(sorted_lts, 0.93, f)
+    append_many_calls_example_at_percentile(sorted_lts, 0.96, f)
+    append_many_calls_example_at_percentile(sorted_lts, 0.99, f)
+
+def write_url_leaderboard(long_tasks, output_filename):
+  leaderboard_duration = defaultdict(int)
+  leaderboard_count_cfs = defaultdict(int)
+  leaderboard_count_lt = defaultdict(int)
+  count_single_url_lts = defaultdict(int)
+  for lt in long_tasks:
+    hostnames = set()
+    for s in lt['subtasks']:
+      uri = urlparse(s['url'])
+      leaderboard_duration[uri.hostname] += s['totalTime']
+      leaderboard_count_cfs[uri.hostname] += 1
+      hostnames.add(uri.hostname)
+    for h in hostnames:
+      leaderboard_count_lt[h] += 1
+    if get_num_urls(lt['subtasks']) == 1:
+      s = lt['subtasks'][0]
+      uri = urlparse(s['url'])
+      count_single_url_lts[uri.hostname] += 1
+
+  # TODO: Write a common function to wrap these.
+  durations = sorted(leaderboard_duration.items(), key= lambda x: x[1], reverse=True)
+  count_cfs = sorted(leaderboard_count_cfs.items(), key= lambda x: x[1], reverse=True)
+  count_lts = sorted(leaderboard_count_lt.items(), key= lambda x: x[1], reverse=True)
+  single_url_lts = sorted(count_single_url_lts.items(), key= lambda x: x[1], reverse=True)
+
+  def add_percentages(l):
+    total = sum([x[1] for x in l])
+
+    return [(x[0], x[1], '{:.4f}%'.format(float(x[1])/total * 100)) for x in l]
+
+  durations = add_percentages(durations)
+  count_cfs = add_percentages(count_cfs)
+  count_lts = add_percentages(count_lts)
+  single_url_lts = add_percentages(single_url_lts)
+
+  LIMIT = 100
+
+  totalDuration = sum([x[1] for x in durations])
+  totalLongTaskCount = len(long_tasks)
+  totalSingleUrlLongTaskCount = len([l for l in long_tasks if get_num_urls(l['subtasks']) == 1])
+  derivedTotalSingleCount = sum([x[1] for x in single_url_lts])
+  print "Total single 1: ", totalSingleUrlLongTaskCount
+  print "Total single 2: ", derivedTotalSingleCount
+  assert totalSingleUrlLongTaskCount == sum([x[1] for x in single_url_lts])
+  totalCallFunctions = sum([x[1] for x in count_cfs])
+
+
+  with open(output_filename, 'w') as f:
+    getTotal = lambda l: str(sum([x[1] for x in l]))
+    f.write('Leaderboard by durations:\n')
+    f.write('Total durations of all call functions in dataset: {:.1f}\n'.format(totalDuration))
+    f.write('(origin, total duration of v8.callFunctions, % of total duration of all origins)\n')
+    f.write(getTotal(durations))
+    f.write('\n')
+    pprint(durations[:LIMIT], f)
+    f.write('\n\n#################\n\n')
+    f.write('Leaderboard by v8 call function count:\n')
+    f.write('Total number of v8.callFunctions in dataset: {0}\n'.format(totalCallFunctions))
+    f.write('(origin, total count of v8.callFunctions, % of total count of all origins)\n')
+    f.write(getTotal(count_cfs))
+    f.write('\n')
+    pprint(count_cfs[:LIMIT], f)
+    f.write('\n\n#################\n\n')
+    f.write('Leaderboard by long task count:\n')
+    f.write('Total number of long tasks in dataset: {0}\n'.format(totalLongTaskCount))
+    f.write('(origin, total count of long tasks in which origin triggered a v8.callFunction, % of total number of long tasks)\n')
+    f.write(getTotal(count_lts))
+    f.write('\n')
+    pprint(count_lts[:LIMIT], f)
+    f.write('\n\n#################\n\n')
+    f.write('Leaderboard by single url long tasks count:\n')
+    f.write('Total number of long tasks with v8 callFunctions from single URL in dataset: {0}\n'.format(totalSingleUrlLongTaskCount))
+    f.write('(origin, total count of long tasks in which origin was the only URL causing v8.callFunction, % of total number of long tasks tasks with single URL)\n')
+    f.write(getTotal(single_url_lts))
+    f.write('\n')
+    pprint(single_url_lts[:LIMIT], f)
+
+def write_very_little_script_examples(long_tasks, output_filename):
+  low_scripts_lts = [lt for lt in long_tasks if get_pattern(lt) == Patterns['VeryLittleScript']]
+  random.seed(0)
+  random.shuffle(low_scripts_lts)
+  LIMIT = 100
+  with open(output_filename, 'w') as f:
+    for lt in low_scripts_lts[:LIMIT]:
+      append_long_task_repr(lt, f)
+      f.write('Trace tag: {0}\n'.format(lt['traceTag']))
+      f.write('Start time: {0}s\n'.format(lt['start']))
+      f.write('####\n')
+
 def main():
   # TODO(dproy): It may eventually make sense to use a real argument parser.
   if len(sys.argv) < 2:
@@ -589,8 +724,12 @@ def main():
   # write_csv(cleaned_json_list, output_filename_prefix + '.csv')
   # write_mean_sampling_error_csv(cleaned_json_list, "sampling_errors.csv")
   # write_error_percentile_json(long_tasks, "error_percentile_examples.json")
-  write_errors_at_percentile_pretty(long_tasks, "error_percentiles_pretty.txt")
+  # write_errors_at_percentile_pretty(long_tasks, "error_percentiles_pretty.txt")
   # write_tall_sampling_errors_csv(long_tasks, "tall_sampling_errors.csv")
+  # write_many_call_functions_examples(long_tasks, 'many_call_functions_example.txt')
+  write_url_leaderboard(long_tasks, 'url_leaderboard.txt')
+  # write_very_little_script_examples(long_tasks, 'very_little_script_examples.txt')
+
 
   print "long tasks with scripts: ", len(long_tasks)
   print "Total results processed:", len(result_json_list)

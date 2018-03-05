@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+!--
+Copyright 2016 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/tracing/base/base.html">
+
+<script>
+'use strict';
+
+tr.exportTo('pi.m', function() {
+  const EXTENSION_PROTOCOL = 'chrome-extension';
+  const LONG_TASKS_THRESHOLD_MS = 50;
+
+  function longTasksAnalysis(result, model) {
+    const modelHelper = model.getOrCreateHelper(
+        tr.model.helpers.ChromeModelHelper);
+    const rendererHelper =
+          findRendererHelperWithMostResourceLoads(modelHelper) ||
+          modelHelper.rendererWithLargestPid;
+
+    const longTasks =
+          rendererHelper.mainThread.sliceGroup.
+          findTopmostSlicesInThisContainer(
+              slice =>
+                  slice.title === 'TaskQueueManager::ProcessTaskFromWorkQueue' &&
+                  slice.duration > LONG_TASKS_THRESHOLD_MS);
+
+    const longTaskBreakdowns = [];
+    for (const lt of longTasks) {
+      longTaskBreakdowns.push({
+        duration: lt.duration,
+        subtasks: collectAllScriptTasks(lt),
+        start: lt.start,
+      });
+    }
+
+    result.addPair('longTaskBreakdowns', longTaskBreakdowns);
+    maybeAddTelemetryInfoToResult(result, model);
+  }
+
+  tr.mre.FunctionRegistry.register(longTasksAnalysis);
+
+  return {
+    longTasksAnalysis: longTasksAnalysis
+  };
+
+  function isScriptSlice(slice) {
+    return slice.title === 'FunctionCall' || slice.title === 'EvaluateScript';
+  }
+
+  // @returns Array<Subtask>
+  function collectAllScriptTasks(slice) {
+    const tasks = [];
+    for (const subSlice of slice.subSlices) {
+      for (const task of subSlice.findTopmostSlicesRelativeToThisSlice(isScriptSlice)) {
+        const subtasks = collectAllScriptTasks(task);
+        const totalSubtaskTime =
+              subtasks.reduce((acc, v) => acc + v.totalTime, 0);
+        tasks.push({
+          start: task.start,
+          totalTime: task.duration,
+          selfTime: task.duration - totalSubtaskTime,
+          type: task.title,
+          url: task.args.data.url,
+          subtasks,
+        });
+      }
+
+    }
+    return tasks;
+  }
+
+  function maybeAddTelemetryInfoToResult(result, model) {
+    for (const metadata of model.metadata) {
+      if (!metadata.value) continue;
+
+      if (metadata.value.telemetry) {
+        result.addPair("TelemetryInfo", metadata.value.telemetry);
+        break;
+      }
+    }
+  }
+
+  function findRendererHelperWithMostResourceLoads(modelHelper) {
+    let maxValue = 0;
+    let rendererHelperWithMaxResourceLoads = undefined;
+    Object.values(modelHelper.rendererHelpers).forEach(rendererHelper => {
+      const mainThreadAsyncSlices =
+            [...rendererHelper.mainThread.asyncSliceGroup.getDescendantEvents()];
+      const resourceLoads =
+            mainThreadAsyncSlices.filter(
+                slice => slice.title === 'ResourceLoad');
+      for (const slice of resourceLoads) {
+        if (slice.args.beginData &&
+            slice.args.beginData.url.substr(0, EXTENSION_PROTOCOL.length) ===
+                EXTENSION_PROTOCOL) {
+          // This is an extension. Definitely not the renderer we're looking
+          // for.
+          return;
+        }
+      }
+      if (resourceLoads.length > maxValue) {
+        maxValue = resourceLoads.length;
+        rendererHelperWithMaxResourceLoads = rendererHelper;
+      }
+    })
+    return rendererHelperWithMaxResourceLoads;
+  }
+});
+
+</script>
